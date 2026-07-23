@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>신호등 길찾기 내비게이션</title>
+  
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; height: 100vh; overflow: hidden; }
+    
+    #sidebar { width: 360px; padding: 20px; background: #ffffff; box-shadow: 2px 0 10px rgba(0,0,0,0.1); z-index: 1000; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
+    h2 { font-size: 1.2rem; color: #1a1a1a; }
+    .input-group { display: flex; flex-direction: column; gap: 8px; }
+    input { padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem; }
+    button { padding: 12px; background: #2563eb; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #1d4ed8; }
+    
+    .info-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; font-size: 0.9rem; color: #334155; }
+    .traffic-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+    .traffic-item:last-child { border-bottom: none; }
+    
+    .status-badge { padding: 4px 10px; border-radius: 12px; font-weight: bold; font-size: 0.85rem; color: white; display: inline-flex; align-items: center; gap: 5px; }
+    .bg-red { background-color: #ef4444; }
+    .bg-green { background-color: #10b981; }
+
+    #map { flex: 1; height: 100%; }
+
+    .signal-marker {
+      background: white;
+      border: 2px solid #333;
+      border-radius: 20px;
+      padding: 4px 8px;
+      font-weight: bold;
+      font-size: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      white-space: nowrap;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="sidebar">
+    <h2>🚦 AI 신호등 내비게이션</h2>
+    
+    <div class="input-group">
+      <input type="text" id="originInput" placeholder="출발지 (예: 서울역)" value="강남역">
+      <input type="text" id="destInput" placeholder="목적지 (예: 판교역)" value="판교역">
+      <button onclick="searchRoute()" id="searchBtn">최적 길찾기 검색</button>
+    </div>
+
+    <div id="routeInfo" class="info-card" style="display:none;">
+      <strong>📍 경로 요약</strong>
+      <p id="routeSummary" style="margin-top: 5px;"></p>
+      <p style="margin-top: 5px; font-weight: bold; color: #2563eb;">
+        예상 소요시간: <span id="routeTime"></span>분
+      </p>
+    </div>
+
+    <div id="signalListCard" class="info-card" style="display:none;">
+      <strong>⏱️ 주요 교차로 신호 타이머</strong>
+      <div id="signalList" style="margin-top: 8px;"></div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <script>
+    const map = L.map('map').setView([37.52, 127.02], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    let markers = [];
+    let routePolyline = null;
+    let signalDataList = [];
+    let timerInterval = null;
+
+    const baseOrigin = { lat: 37.4979, lng: 127.0276 };
+    const baseDest = { lat: 37.3947, lng: 127.1112 };
+
+    async function searchRoute() {
+      const origin = document.getElementById('originInput').value;
+      const destination = document.getElementById('destInput').value;
+      const searchBtn = document.getElementById('searchBtn');
+
+      if (!origin || !destination) {
+        alert('출발지와 목적지를 모두 입력해 주세요.');
+        return;
+      }
+
+      searchBtn.innerText = 'AI 경로 분석 중...';
+      searchBtn.disabled = true;
+
+      try {
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ origin, destination })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || '오류 발생');
+
+        renderRouteAndSignals(data);
+
+      } catch (err) {
+        alert('경로 탐색 실패: ' + err.message);
+      } finally {
+        searchBtn.innerText = '최적 길찾기 검색';
+        searchBtn.disabled = false;
+      }
+    }
+
+    function renderRouteAndSignals(data) {
+      markers.forEach(m => map.removeLayer(m));
+      markers = [];
+      if (routePolyline) map.removeLayer(routePolyline);
+      if (timerInterval) clearInterval(timerInterval);
+
+      document.getElementById('routeInfo').style.display = 'block';
+      document.getElementById('signalListCard').style.display = 'block';
+      document.getElementById('routeSummary').innerText = data.summary;
+      document.getElementById('routeTime').innerText = data.totalDurationMinutes;
+
+      const points = [
+        [baseOrigin.lat, baseOrigin.lng],
+        ...data.trafficLights.map(tl => [
+          baseOrigin.lat + (baseDest.lat - baseOrigin.lat) * tl.offsetLat,
+          baseOrigin.lng + (baseDest.lng - baseOrigin.lng) * tl.offsetLng
+        ]),
+        [baseDest.lat, baseDest.lng]
+      ];
+
+      routePolyline = L.polyline(points, { color: '#2563eb', weight: 6, opacity: 0.8 }).addTo(map);
+      map.fitBounds(routePolyline.getBounds(), { padding: [50, 50] });
+
+      const now = Math.floor(Date.now() / 1000);
+      signalDataList = data.trafficLights.map((tl, index) => {
+        const lat = points[index + 1][0];
+        const lng = points[index + 1][1];
+
+        const icon = L.divIcon({
+          className: 'custom-div-icon',
+          html: `<div id="map-signal-${index}" class="signal-marker">계산중...</div>`,
+          iconSize: [100, 30],
+          iconAnchor: [50, 15]
+        });
+
+        const marker = L.marker([lat, lng], { icon }).addTo(map);
+        markers.push(marker);
+
+        return {
+          ...tl,
+          index,
+          totalCycle: tl.redDuration + tl.greenDuration,
+          startTime: now - Math.floor(Math.random() * 30)
+        };
+      });
+
+      updateSignals();
+      timerInterval = setInterval(updateSignals, 1000);
+    }
+
+    function updateSignals() {
+      const now = Math.floor(Date.now() / 1000);
+      const listContainer = document.getElementById('signalList');
+      listContainer.innerHTML = '';
+
+      signalDataList.forEach(sig => {
+        const elapsed = (now - sig.startTime) % sig.totalCycle;
+        const isRed = elapsed < sig.redDuration;
+        const remaining = isRed ? sig.redDuration - elapsed : sig.totalCycle - elapsed;
+
+        const colorClass = isRed ? 'bg-red' : 'bg-green';
+        const labelText = isRed ? '🔴 적색' : '🟢 녹색';
+
+        const mapMarkerEl = document.getElementById(`map-signal-${sig.index}`);
+        if (mapMarkerEl) {
+          mapMarkerEl.style.borderColor = isRed ? '#ef4444' : '#10b981';
+          mapMarkerEl.innerHTML = `${sig.name}<br>${labelText} ${remaining}초`;
+        }
+
+        const itemHtml = `
+          <div class="traffic-item">
+            <div><strong>${sig.name}</strong></div>
+            <div class="status-badge ${colorClass}">
+              <span>${labelText}</span>
+              <span>${remaining}초</span>
+            </div>
+          </div>
+        `;
+        listContainer.innerHTML += itemHtml;
+      });
+    }
+  </script>
+</body>
+</html>
