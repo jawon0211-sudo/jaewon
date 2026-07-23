@@ -17,8 +17,8 @@ export default async function handler(req, res) {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    
-    // JSON 응답 스키마 정의
+
+    // JSON 구조화 응답 스키마
     const responseSchema = {
       type: "object",
       properties: {
@@ -50,7 +50,7 @@ export default async function handler(req, res) {
     `;
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
+      model: "gemini-1.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: responseSchema,
@@ -59,7 +59,7 @@ export default async function handler(req, res) {
 
     const result = await model.generateContent(prompt);
     const responseText = await result.response.text();
-    
+
     return res.status(200).json(JSON.parse(responseText));
 
   } catch (error) {
