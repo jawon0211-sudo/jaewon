@@ -18,7 +18,6 @@ export default async function handler(req, res) {
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
 
-    // JSON 구조화 응답 스키마
     const responseSchema = {
       type: "object",
       properties: {
@@ -50,7 +49,7 @@ export default async function handler(req, res) {
     `;
 
     const model = genAI.getGenerativeModel({
-      model: "gemini-3.1-flash-lite",
+      model: "gemini-1.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: responseSchema,
