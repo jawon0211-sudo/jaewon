@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -16,24 +16,24 @@ export default async function handler(req, res) {
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
+    const ai = new GoogleGenAI({ apiKey });
 
     const responseSchema = {
-      type: "object",
+      type: Type.OBJECT,
       properties: {
-        summary: { type: "string", description: "경로 요약 및 안내 메시지" },
-        totalDurationMinutes: { type: "number", description: "총 예상 소요시간(분)" },
+        summary: { type: Type.STRING, description: "경로 요약 및 안내 메시지" },
+        totalDurationMinutes: { type: Type.NUMBER, description: "총 예상 소요시간(분)" },
         trafficLights: {
-          type: "array",
+          type: Type.ARRAY,
           description: "경로 상 주요 신호등 목록",
           items: {
-            type: "object",
+            type: Type.OBJECT,
             properties: {
-              name: { type: "string", description: "신호등 위치 이름" },
-              offsetLat: { type: "number", description: "출발지-목적지 사이 가상 위도 오프셋 (0.0~1.0)" },
-              offsetLng: { type: "number", description: "출발지-목적지 사이 가상 경도 오프셋 (0.0~1.0)" },
-              redDuration: { type: "number", description: "적색불 주기(초)" },
-              greenDuration: { type: "number", description: "녹색불 주기(초)" }
+              name: { type: Type.STRING, description: "신호등 위치 이름" },
+              offsetLat: { type: Type.NUMBER, description: "출발지-목적지 사이 가상 위도 오프셋 (0.0~1.0)" },
+              offsetLng: { type: Type.NUMBER, description: "출발지-목적지 사이 가상 경도 오프셋 (0.0~1.0)" },
+              redDuration: { type: Type.NUMBER, description: "적색불 주기(초)" },
+              greenDuration: { type: Type.NUMBER, description: "녹색불 주기(초)" }
             },
             required: ["name", "offsetLat", "offsetLng", "redDuration", "greenDuration"]
           }
@@ -48,18 +48,17 @@ export default async function handler(req, res) {
       offsetLat와 offsetLng는 출발지(0)에서 목적지(1) 사이의 위치 비율을 의미합니다. (예: 첫 번째 신호등 0.25, 두 번째 0.5, 세 번째 0.75)
     `;
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: prompt,
+      config: {
         responseMimeType: "application/json",
         responseSchema: responseSchema,
-      }
+      },
     });
 
-    const result = await model.generateContent(prompt);
-    const responseText = await result.response.text();
-
-    return res.status(200).json(JSON.parse(responseText));
+    const result = JSON.parse(response.text);
+    return res.status(200).json(result);
 
   } catch (error) {
     console.error("Gemini API Error:", error);
